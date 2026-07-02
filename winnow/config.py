@@ -10,6 +10,20 @@ def enabled() -> bool:
     return os.environ.get("WINNOW_ENABLED", "true").strip().lower() not in ("false", "0", "no")
 
 
+def active_model() -> str:
+    env_model = os.environ.get("WINNOW_LOCAL_MODEL")
+    if env_model:
+        return env_model.strip()
+    model_file = os.path.expanduser("~/.winnow/active_model")
+    if os.path.exists(model_file):
+        try:
+            with open(model_file, "r") as f:
+                return f.read().strip()
+        except Exception:
+            pass
+    return "Qwen3.5-9B-TNG-PKD-Qwopus-Coder-Qwythos-qx86-hi-mlx"
+
+
 def mode() -> str:
     return os.environ.get("WINNOW_MODE", "thorough").strip().lower()
 

@@ -127,19 +127,7 @@ def _detect_omlx_prompt(body: dict) -> str | None:
 async def _call_omlx(prompt: str) -> str:
     url = f"{config.omlx_url()}/v1/chat/completions"
     async with httpx.AsyncClient(timeout=45.0) as client:
-        try:
-            m_resp = await client.get(f"{config.omlx_url()}/v1/models")
-            data = m_resp.json().get("data", [])
-            model_id = None
-            for m in data:
-                m_id = m["id"]
-                if "gemma" not in m_id.lower():
-                    model_id = m_id
-                    break
-            if not model_id or "gemma" in model_id.lower():
-                model_id = "Qwen3.5-9B-TNG-PKD-Qwopus-Coder-Qwythos-qx86-hi-mlx"
-        except Exception:
-            model_id = "Qwen3.5-9B-TNG-PKD-Qwopus-Coder-Qwythos-qx86-hi-mlx"
+        model_id = config.active_model()
             
         payload = {
             "model": model_id,

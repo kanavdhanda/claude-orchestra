@@ -15,6 +15,19 @@ def install_and_import(package):
 install_and_import("rumps")
 import rumps
 
+def get_active_model() -> str:
+    env_model = os.environ.get("WINNOW_LOCAL_MODEL")
+    if env_model:
+        return env_model.strip()
+    model_file = os.path.expanduser("~/.winnow/active_model")
+    if os.path.exists(model_file):
+        try:
+            with open(model_file, "r") as f:
+                return f.read().strip()
+        except Exception:
+            pass
+    return "Qwen3.5-9B-TNG-PKD-Qwopus-Coder-Qwythos-qx86-hi-mlx"
+
 class WinnowMenuBarApp(rumps.App):
     def __init__(self):
         super(WinnowMenuBarApp, self).__init__("Winnow", title="💸")
@@ -23,9 +36,8 @@ class WinnowMenuBarApp(rumps.App):
         self.toggle_item = rumps.MenuItem("Toggle Winnow (⌥⌘W)", callback=self.toggle_winnow, key="w")
         self.stats_item = rumps.MenuItem("Saved: 0 tokens ($0.00)", callback=None)
         self.omlx_status = rumps.MenuItem("oMLX: Checking...", callback=None)
+        self.model_menu = rumps.MenuItem("Select Active Model")
         
-        # rumps natively appends its own 'Quit' item at the very bottom,
-        # so we only configure our custom management actions here.
         self.menu = [
             self.status_item,
             self.toggle_item,
@@ -33,7 +45,7 @@ class WinnowMenuBarApp(rumps.App):
             self.stats_item,
             rumps.separator,
             self.omlx_status,
-            rumps.MenuItem("Restart oMLX Server", callback=self.restart_omlx),
+            self.model_menu,
             rumps.separator,
             rumps.MenuItem("Restart Winnow Proxy", callback=self.restart_proxy),
         ]
@@ -65,31 +77,66 @@ class WinnowMenuBarApp(rumps.App):
         except Exception:
             self.stats_item.title = "Saved: Proxy Offline"
             
-        # 3. Check oMLX server status (port 8081) and active model
+        # 3. Check oMLX server status & active model liveness
+        active_model = get_active_model()
         try:
+            # First, fetch available models
             req = urllib.request.Request("http://localhost:8081/v1/models", method="GET")
             with urllib.request.urlopen(req, timeout=1.0) as response:
                 data = json.loads(response.read().decode("utf-8"))
-                models = data.get("data", [])
+                models = [m["id"] for m in data.get("data", []) if "gemma" not in m["id"].lower()]
                 
-                # Filter out cached Gemma models if they exist in oMLX's response
-                model_id = None
-                for m in models:
-                    m_id = m["id"]
-                    if "gemma" not in m_id.lower():
-                        model_id = m_id
-                        break
-                
-                # If none found, or only Gemma is advertised, override to default Qwen
-                if not model_id or "gemma" in model_id.lower():
-                    model_id = "Qwen3.5-9B-TNG-PKD-Qwopus-Coder-Qwythos-qx86-hi-mlx"
-                
-                display_name = model_id.split("/")[-1]
-                if len(display_name) > 28:
-                    display_name = display_name[:25] + "..."
-                self.omlx_status.title = f"🟢 oMLX: {display_name}"
+                self.model_menu.clear()
+                all_options = models if active_model in models else [active_model] + models
+                for model in all_options:
+                    item = rumps.MenuItem(model, callback=self.select_model)
+                    if model == active_model:
+                        item.state = True
+                    self.model_menu.add(item)
+            
+            # Second, perform a true query liveness check on the active model
+            test_payload = {
+                "model": active_model,
+                "messages": [
+                    {"role": "user", "content": "say true"}
+                ],
+                "max_tokens": 5
+            }
+            req_liveness = urllib.request.Request(
+                "http://localhost:8081/v1/chat/completions",
+                data=json.dumps(test_payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req_liveness, timeout=2.5) as response:
+                res_data = json.loads(response.read().decode("utf-8"))
+                reply = res_data["choices"][0]["message"]["content"].strip().lower()
+                if len(reply) > 0:
+                    display_name = active_model.split("/")[-1]
+                    if len(display_name) > 28:
+                        display_name = display_name[:25] + "..."
+                    self.omlx_status.title = f"🟢 oMLX: {display_name}"
+                else:
+                    self.omlx_status.title = f"🔴 oMLX: Liveness Empty Output"
         except Exception:
-            self.omlx_status.title = "🔴 oMLX: Offline"
+            display_name = active_model.split("/")[-1]
+            if len(display_name) > 20:
+                display_name = display_name[:17] + "..."
+            self.omlx_status.title = f"🔴 oMLX: Pinned Model Error ({display_name})"
+
+    def select_model(self, sender):
+        model_file = os.path.expanduser("~/.winnow/active_model")
+        try:
+            os.makedirs(os.path.dirname(model_file), exist_ok=True)
+            with open(model_file, "w") as f:
+                f.write(sender.title)
+            rumps.notification("oMLX", "Active Model Pinned", f"Selected {sender.title.split('/')[-1]}")
+            # Update checks dynamically
+            for name, item in self.model_menu.items():
+                item.state = (name == sender.title)
+        except Exception as e:
+            rumps.alert(f"Error pinning model: {str(e)}")
+        self.update_menu_state(None)
 
     def toggle_winnow(self, sender):
         disabled_file = os.path.expanduser("~/.winnow/disabled")
@@ -110,7 +157,6 @@ class WinnowMenuBarApp(rumps.App):
         self.update_menu_state(None)
 
     def restart_omlx(self, sender):
-        # Shutdown if running
         try:
             res = subprocess.run("lsof -t -i :8081", shell=True, capture_output=True, text=True)
             pids = res.stdout.strip().split()
@@ -120,7 +166,6 @@ class WinnowMenuBarApp(rumps.App):
         except Exception:
             pass
             
-        # Relaunch using open -a oMLX
         try:
             subprocess.run(["open", "-a", "oMLX"])
             rumps.notification("oMLX", "Restarting...", "Launched local oMLX Dashboard Application.")
