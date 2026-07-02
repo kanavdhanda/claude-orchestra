@@ -1,3 +1,9 @@
+---
+tags: [research-tools, exclusion, unmaintained-mcp]
+related: []
+influences: []
+---
+
 # 0004. Exclude Semantic Scholar MCP and OpenAlex MCP
 
 **Status:** Accepted

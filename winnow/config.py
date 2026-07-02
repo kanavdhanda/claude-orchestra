@@ -31,9 +31,41 @@ def json_keep_items() -> int:
     return int(os.environ.get("WINNOW_JSON_KEEP_ITEMS", "20"))
 
 
+def text_keep_chars() -> int:
+    return int(os.environ.get("WINNOW_TEXT_KEEP_CHARS", "8000"))
+
+
+def stub_old_tool_results() -> bool:
+    return os.environ.get("WINNOW_STUB_OLD_TOOL_RESULTS", "true").strip().lower() not in ("false", "0", "no")
+
+
+def trim_prose() -> bool:
+    return os.environ.get("WINNOW_TRIM_PROSE", "false").strip().lower() not in ("false", "0", "no")
+
+
 def db_path() -> str:
     return os.path.expanduser(os.environ.get("WINNOW_DB_PATH", "~/.winnow/winnow.db"))
 
 
 def embedding_model() -> str:
     return os.environ.get("WINNOW_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+
+
+def minify_system() -> bool:
+    return os.environ.get("WINNOW_MINIFY_SYSTEM", "false").strip().lower() not in ("false", "0", "no")
+
+
+def max_session_cost() -> float:
+    return float(os.environ.get("WINNOW_MAX_SESSION_COST", "0.30"))
+
+
+
+def omlx_url() -> str:
+    return os.environ.get("WINNOW_OMLX_URL", "http://localhost:8081").rstrip("/")
+
+
+def omlx_enabled() -> bool:
+    return os.environ.get("WINNOW_OMLX_ENABLED", "true").strip().lower() not in ("false", "0", "no")
+
+
+

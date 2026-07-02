@@ -1,3 +1,9 @@
+---
+tags: [web-crawling, exclusion, redundant-tool]
+related: []
+influences: []
+---
+
 # 0003. Exclude Crawl4AI
 
 **Status:** Accepted

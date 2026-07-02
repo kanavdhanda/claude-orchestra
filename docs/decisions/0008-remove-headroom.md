@@ -1,3 +1,9 @@
+---
+tags: [headroom, office-docs, removal]
+related: []
+influences: []
+---
+
 # 0008. Remove Headroom (Office-doc reading via markitdown)
 
 **Status:** Accepted

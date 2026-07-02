@@ -1,3 +1,9 @@
+---
+tags: [token-budget, governance, not-buildable]
+related: []
+influences: []
+---
+
 # 0006. No Hard Token Governor
 
 **Status:** Accepted

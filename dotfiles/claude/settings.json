@@ -48,5 +48,11 @@
   "editorMode": "normal",
   "verbose": true,
   "preferredNotifChannel": "auto",
-  "agentPushNotifEnabled": true
+  "agentPushNotifEnabled": true,
+  "includeCoAuthoredBy": false,
+  "gitAttribution": false,
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  }
 }

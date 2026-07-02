@@ -1,3 +1,9 @@
+---
+tags: [yagni, scaffolding]
+related: []
+influences: []
+---
+
 # 0009. No Speculative Scaffold Directories
 
 **Status:** Accepted

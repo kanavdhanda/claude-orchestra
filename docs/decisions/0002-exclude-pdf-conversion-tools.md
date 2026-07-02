@@ -1,3 +1,9 @@
+---
+tags: [pdf, exclusion, redundant-tool]
+related: [0007-no-automatic-pdf-ingestion-hook]
+influences: []
+---
+
 # 0002. Exclude Docling, Marker, MinerU, Nougat
 
 **Status:** Accepted

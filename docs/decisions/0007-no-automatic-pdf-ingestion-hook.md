@@ -1,3 +1,9 @@
+---
+tags: [pdf, hooks, not-built]
+related: [0002-exclude-pdf-conversion-tools]
+influences: []
+---
+
 # 0007. No Automatic PDF-Ingestion Hook
 
 **Status:** Accepted

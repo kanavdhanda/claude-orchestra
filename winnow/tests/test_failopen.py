@@ -6,6 +6,7 @@ from winnow.tests import fixtures
 
 
 def test_scoring_error_falls_back_to_original(monkeypatch):
+    monkeypatch.setenv("WINNOW_TRIM_PROSE", "true")
     def boom(*args, **kwargs):
         raise RuntimeError("scoring exploded")
 
@@ -16,6 +17,7 @@ def test_scoring_error_falls_back_to_original(monkeypatch):
 
 
 def test_truncation_error_falls_back_to_original(monkeypatch):
+    monkeypatch.setenv("WINNOW_STUB_OLD_TOOL_RESULTS", "false")
     def boom(*args, **kwargs):
         raise RuntimeError("truncation exploded")
 

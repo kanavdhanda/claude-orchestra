@@ -5,9 +5,11 @@ back to forwarding the untouched original bytes — trimming must never be
 able to break a real request.
 """
 import json
+import os
 
 import httpx
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import StreamingResponse
 
 from winnow import config, store, tokencount, trimmer
 
@@ -26,20 +28,238 @@ async def _forward(method: str, url: str, headers: dict, content: bytes) -> http
         return await client.request(method, url, headers=headers, content=content)
 
 
-def _trim_and_log(raw: bytes) -> bytes:
-    """Parse, trim, log. Any failure here (bad JSON, scoring error, DB error)
-    means: return the original raw bytes, unmodified."""
-    body = json.loads(raw)
-    trimmed = trimmer.trim(body)
-    before = tokencount.estimate(body)
-    after = tokencount.estimate(trimmed)
-    out = json.dumps(trimmed).encode("utf-8") if trimmed is not body else raw
-    try:
-        stats = trimmer.diff_stats(body, trimmed)
-        store.log_request(tokens_before=before, tokens_after=after, mode=config.mode(), **stats)
-    except Exception:
-        pass  # observability must never block a real request
-    return out
+def _make_sse_chunk(event: str, data: dict) -> bytes:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n".encode("utf-8")
+
+
+def _calculate_request_cost(model: str, tokens: int) -> float:
+    # Default is Sonnet 5 pricing
+    rate_cached = 0.30  # per Million tokens
+    rate_uncached = 3.00 # per Million tokens
+    
+    m_lower = model.lower()
+    if "opus" in m_lower:
+        rate_cached = 0.50
+        rate_uncached = 5.00
+    elif "haiku" in m_lower:
+        rate_cached = 0.03
+        rate_uncached = 0.25
+        
+    effective_rate = (0.90 * rate_cached) + (0.10 * rate_uncached)
+    return (tokens * effective_rate) / 1000000.0
+
+
+async def sentinel_warning_stream(tokens: int, cost: float, limit: float, model: str):
+    warning_text = (
+        f"⚠️ [WINNOW SENTINEL WARNING]: This session has consumed approximately {tokens:,} tokens "
+        f"on model '{model}' (est. cost ${cost:.4f} per turn), exceeding your safety budget cap of ${limit:.2f}.\n\n"
+        f"To protect your wallet and Claude rate limits, Winnow intercepted this request.\n\n"
+        f"To continue anyway, you can:\n"
+        f"1. Start a fresh session (type '/clear' in Claude Code).\n"
+        f"2. Increase your WINNOW_MAX_SESSION_COST environment variable (currently ${limit:.2f}).\n"
+    )
+    yield _make_sse_chunk("message_start", {
+        "type": "message_start",
+        "message": {
+            "id": "msg_sentinel",
+            "type": "message",
+            "role": "assistant",
+            "content": [],
+            "model": "claude-3-5-sonnet-20241022",
+            "stop_reason": None,
+            "stop_sequence": None,
+            "usage": {"input_tokens": 0, "output_tokens": 0}
+        }
+    })
+    yield _make_sse_chunk("content_block_start", {
+        "type": "content_block_start",
+        "index": 0,
+        "content_block": {"type": "text", "text": ""}
+    })
+    yield _make_sse_chunk("content_block_delta", {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {"type": "text_delta", "text": warning_text}
+    })
+    yield _make_sse_chunk("content_block_stop", {
+        "type": "content_block_stop",
+        "index": 0
+    })
+    yield _make_sse_chunk("message_delta", {
+        "type": "message_delta",
+        "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+        "usage": {"output_tokens": 0}
+    })
+    yield _make_sse_chunk("message_stop", {
+        "type": "message_stop"
+    })
+
+
+def _detect_omlx_prompt(body: dict) -> str | None:
+    if not config.omlx_enabled():
+        return None
+    messages = body.get("messages", [])
+    if not messages:
+        return None
+    latest = messages[-1]
+    if latest.get("role") != "user":
+        return None
+    content = latest.get("content")
+    if not isinstance(content, str):
+        return None
+    
+    # Check prefixes
+    prefixes = [
+        "explain:", "doc:", "test:", "regex:", "commit:",
+        "winnow:explain", "winnow:doc", "winnow:test", "winnow:regex", "winnow:commit"
+    ]
+    for p in prefixes:
+        if content.lower().startswith(p):
+            return content[len(p):].strip()
+            
+    # Also auto-route if it's very clearly a simple question and session is short
+    if len(content.split()) < 15 and any(word in content.lower() for word in ["explain", "how do i", "what is", "write docstring", "generate regex"]):
+        return content
+        
+    return None
+
+
+async def _call_omlx(prompt: str) -> str:
+    url = f"{config.omlx_url()}/v1/chat/completions"
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        try:
+            m_resp = await client.get(f"{config.omlx_url()}/v1/models")
+            model_id = m_resp.json()["data"][0]["id"]
+        except Exception:
+            model_id = "mlx-community/gemma-4-12b-coder-fable5-composer2.5-8bit"
+            
+        payload = {
+            "model": model_id,
+            "messages": [
+                {"role": "system", "content": "You are a senior developer. Respond extremely concisely, providing direct answers and code snippets without conversational filler or apologies."},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 2000
+        }
+        try:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            return resp.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            return f"Error contacting local oMLX server: {str(e)}"
+
+
+async def omlx_response_stream(text: str):
+    yield _make_sse_chunk("message_start", {
+        "type": "message_start",
+        "message": {
+            "id": "msg_omlx",
+            "type": "message",
+            "role": "assistant",
+            "content": [],
+            "model": "local-omlx-gemma",
+            "stop_reason": None,
+            "stop_sequence": None,
+            "usage": {"input_tokens": 0, "output_tokens": 0}
+        }
+    })
+    yield _make_sse_chunk("content_block_start", {
+        "type": "content_block_start",
+        "index": 0,
+        "content_block": {"type": "text", "text": ""}
+    })
+    
+    # Yield in chunks to simulate active streaming
+    chunk_size = 30
+    for i in range(0, len(text), chunk_size):
+        chunk = text[i:i+chunk_size]
+        yield _make_sse_chunk("content_block_delta", {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "text_delta", "text": chunk}
+        })
+        
+    yield _make_sse_chunk("content_block_stop", {
+        "type": "content_block_stop",
+        "index": 0
+    })
+    yield _make_sse_chunk("message_delta", {
+        "type": "message_delta",
+        "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+        "usage": {"output_tokens": 0}
+    })
+    yield _make_sse_chunk("message_stop", {
+        "type": "message_stop"
+    })
+
+
+def _compress_git_diffs(body: dict) -> dict:
+    messages = body.get("messages", [])
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    text = block.get("content")
+                    if isinstance(text, str) and ("diff --git" in text or "git diff" in text):
+                        lines = text.split("\n")
+                        new_lines = []
+                        skipping = False
+                        for line in lines:
+                            if line.startswith("diff --git"):
+                                if any(x in line for x in ["package-lock.json", "yarn.lock", "pnpm-lock.yaml"]):
+                                    skipping = True
+                                else:
+                                    skipping = False
+                            if not skipping:
+                                new_lines.append(line)
+                        block["content"] = "\n".join(new_lines)
+        elif isinstance(content, str) and ("diff --git" in content or "git diff" in content):
+            lines = content.split("\n")
+            new_lines = []
+            skipping = False
+            for line in lines:
+                if line.startswith("diff --git"):
+                    if any(x in line for x in ["package-lock.json", "yarn.lock", "pnpm-lock.yaml"]):
+                        skipping = True
+                    else:
+                        skipping = False
+                if not skipping:
+                    new_lines.append(line)
+            msg["content"] = "\n".join(new_lines)
+    return body
+
+
+
+def _strip_preloaded_file_contents(body: dict) -> dict:
+    messages = body.get("messages", [])
+    if not messages:
+        return body
+    
+    first_msg = messages[0]
+    content = first_msg.get("content")
+    if not isinstance(content, str):
+        return body
+        
+    if "### " in content and "```" in content:
+        parts = content.split("```")
+        new_parts = []
+        for idx, part in enumerate(parts):
+            if idx % 2 == 1:
+                prev_part = parts[idx-1]
+                if "### " in prev_part or "File contents:" in prev_part:
+                    lang = ""
+                    lines = part.split("\n")
+                    if lines and not lines[0].strip().startswith("print") and len(lines[0]) < 15:
+                        lang = lines[0] + "\n"
+                    new_parts.append(f"{lang}[Winnow: File content stripped to save tokens. Use view_file to read if needed.]\n")
+                else:
+                    new_parts.append(part)
+            else:
+                new_parts.append(part)
+        first_msg["content"] = "```".join(new_parts)
+    return body
+
 
 
 @app.get("/winnow/stats")
@@ -59,9 +279,42 @@ async def proxy(path: str, request: Request):
 
     if config.enabled() and request.method == "POST" and path == "v1/messages":
         try:
-            out_bytes = _trim_and_log(raw)
+            body = json.loads(raw)
+            body = _strip_preloaded_file_contents(body)
+            body = _compress_git_diffs(body)
+            
+            # 1. Check transparent local oMLX routing
+            omlx_prompt = _detect_omlx_prompt(body)
+            if omlx_prompt:
+                result = await _call_omlx(omlx_prompt)
+                store.log_request(
+                    tokens_before=tokencount.estimate(body),
+                    tokens_after=0,
+                    mode="omlx",
+                    detail={"prompt": omlx_prompt}
+                )
+                return StreamingResponse(omlx_response_stream(result), media_type="text/event-stream")
+            
+            # 2. Check Dollar Cost Sentinel Safety Cap
+            before = tokencount.estimate(body)
+            model_name = body.get("model", "claude-3-5-sonnet")
+            est_cost = _calculate_request_cost(model_name, before)
+            limit = config.max_session_cost()
+            if est_cost > limit:
+                return StreamingResponse(sentinel_warning_stream(before, est_cost, limit, model_name), media_type="text/event-stream")
+            
+            # 3. Regular SMWT Trimming
+            trimmed = trimmer.trim(body)
+            after = tokencount.estimate(trimmed)
+            out_bytes = json.dumps(trimmed).encode("utf-8")
+            
+            try:
+                stats_diff = trimmer.diff_stats(body, trimmed)
+                store.log_request(tokens_before=before, tokens_after=after, mode=config.mode(), **stats_diff)
+            except Exception:
+                pass
         except Exception:
-            out_bytes = raw  # fail open: forward the original request untouched
+            out_bytes = raw  # fail open: forward original untouched bytes
 
     target = f"{config.upstream().rstrip('/')}/{path}"
     if request.url.query:

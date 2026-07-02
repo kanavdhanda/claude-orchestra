@@ -11,3 +11,4 @@
 - [0009. No Speculative Scaffold Directories](0009-no-speculative-scaffold-directories.md) — YAGNI
 - [0010. Use Official ast-grep MCP Instead of Building a Custom One](0010-use-official-ast-grep-mcp.md) — official server already exists
 - [0011. No MCP Wrappers for fd and tree-sitter](0011-no-fd-tree-sitter-mcp-wrappers.md) — plain Bash invocation is sufficient
+- [0012. MLX Fallback Contract](0012-mlx-fallback-contract.md) — fail-open contract for MLX-dependent features

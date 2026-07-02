@@ -1,3 +1,9 @@
+---
+tags: [fd, tree-sitter, cli-sufficient]
+related: []
+influences: []
+---
+
 # 0011. No MCP Wrappers for fd and tree-sitter
 
 **Status:** Accepted

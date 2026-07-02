@@ -1,3 +1,9 @@
+---
+tags: [task-master, exclusion, redundant-tool]
+related: []
+influences: []
+---
+
 # 0001. Exclude Task Master
 
 **Status:** Accepted

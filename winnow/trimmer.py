@@ -9,6 +9,7 @@ block type (tool_use, image, thinking, ...) is left verbatim, since those
 often carry API-required fields (ids, signatures) that must not be altered.
 """
 import json
+import re
 
 from winnow import config, json_truncate, scoring, tokencount
 
@@ -75,21 +76,22 @@ def _classify_and_process(text: str, query: str, mode: str, threshold: float, ke
     # this same request, not against the candidate alone.
     s = scoring.score(query, text, corpus=corpus, mode=mode)
     if s < threshold:
-        # ponytail: deliberately no embedded floats here — digits tokenize
-        # inefficiently in BPE and a verbose stub can erase the savings it's
-        # supposed to create. Exact scores are still logged to sqlite
-        # (store.py) for observability; this text only needs to explain why.
         return "[winnow: older message omitted, low relevance to current topic]"
     return text
 
 
-def _process_content(content, query: str, mode: str, threshold: float, keep_items: int, corpus: list):
+def _process_content(content, is_old_turn: bool, query: str = None, mode: str = None,
+                     threshold: float = None, keep_items: int = 20, corpus: list = None):
     if isinstance(content, str):
-        return _classify_and_process(content, query, mode, threshold, keep_items, corpus)
+        if config.trim_prose() and is_old_turn:
+            new_text = _classify_and_process(content, query, mode, threshold, keep_items, corpus)
+            return new_text
+        return content
 
     if not isinstance(content, list):
         return content
 
+    any_changed = False
     new_blocks = []
     for block in content:
         if not isinstance(block, dict):
@@ -97,29 +99,78 @@ def _process_content(content, query: str, mode: str, threshold: float, keep_item
             continue
 
         btype = block.get("type")
-        if btype == "text" and isinstance(block.get("text"), str):
+        if btype == "tool_result":
             nb = dict(block)
-            nb["text"] = _classify_and_process(block["text"], query, mode, threshold, keep_items, corpus)
-            new_blocks.append(nb)
-        elif btype == "tool_result":
-            nb = dict(block)
+            cache_ctrl = nb.get("cache_control")
+            
+            # Determine truncation parameters based on age
+            is_stub_turn = is_old_turn and config.stub_old_tool_results()
+            max_chars = 3000 if is_stub_turn else config.text_keep_chars()
+            keep_edge = 1500 if is_stub_turn else None
+            
             inner = block.get("content")
             if isinstance(inner, str):
-                nb["content"] = _classify_and_process(inner, query, mode, threshold, keep_items, corpus)
+                kind, parsed = _classify_kind(inner)
+                if kind == "json":
+                    if json_truncate.needs_truncation(parsed, keep_items):
+                        nb["content"] = json.dumps(json_truncate.truncate_json(parsed, keep_items))
+                        any_changed = True
+                else:
+                    if len(inner) > max_chars:
+                        if keep_edge is not None:
+                            nb["content"] = inner[:keep_edge] + f"\n\n... [winnow: {len(inner) - (keep_edge * 2)} characters omitted from old tool result for cache stability] ...\n\n" + inner[-keep_edge:]
+                        else:
+                            nb["content"] = inner[:max_chars] + f"\n\n... [{len(inner) - max_chars} characters omitted by winnow] ..."
+                        any_changed = True
             elif isinstance(inner, list):
                 new_inner = []
+                inner_changed = False
                 for sub in inner:
                     if isinstance(sub, dict) and sub.get("type") == "text" and isinstance(sub.get("text"), str):
                         nsub = dict(sub)
-                        nsub["text"] = _classify_and_process(sub["text"], query, mode, threshold, keep_items, corpus)
+                        sub_text = sub["text"]
+                        kind, parsed = _classify_kind(sub_text)
+                        sub_changed = False
+                        if kind == "json":
+                            if json_truncate.needs_truncation(parsed, keep_items):
+                                nsub["text"] = json.dumps(json_truncate.truncate_json(parsed, keep_items))
+                                sub_changed = True
+                        else:
+                            if len(sub_text) > max_chars:
+                                if keep_edge is not None:
+                                    nsub["text"] = sub_text[:keep_edge] + f"\n\n... [winnow: {len(sub_text) - (keep_edge * 2)} characters omitted from old tool result for cache stability] ...\n\n" + sub_text[-keep_edge:]
+                                else:
+                                    nsub["text"] = sub_text[:max_chars] + f"\n\n... [{len(sub_text) - max_chars} characters omitted by winnow] ..."
+                                sub_changed = True
+                        
+                        if sub_changed:
+                            inner_changed = True
                         new_inner.append(nsub)
                     else:
                         new_inner.append(sub)
-                nb["content"] = new_inner
+                if inner_changed:
+                    nb["content"] = new_inner
+                    any_changed = True
+            
+            if cache_ctrl:
+                nb["cache_control"] = cache_ctrl
             new_blocks.append(nb)
+            
+        elif btype == "text" and isinstance(block.get("text"), str):
+            nb = dict(block)
+            if config.trim_prose() and is_old_turn:
+                new_text = _classify_and_process(block["text"], query, mode, threshold, keep_items, corpus)
+                if new_text is not block["text"]:
+                    nb["text"] = new_text
+                    any_changed = True
+            new_blocks.append(nb)
+            
         else:
             new_blocks.append(block)
-    return new_blocks
+            
+    if any_changed:
+        return new_blocks
+    return content
 
 
 def _newest_user_text(messages: list) -> str:
@@ -163,41 +214,98 @@ def _last_cache_breakpoint_index(messages: list) -> int:
     return idx
 
 
+def _minify_system_text(text: str) -> str:
+    if not isinstance(text, str):
+        return text
+    
+    # Strip Ponytail block: from "#+ Ponytail, lazy senior dev" until next "# " or end of string
+    text = re.sub(
+        r"#+ Ponytail, lazy senior dev mode.*?(?=\n#+ |\Z)",
+        "",
+        text,
+        flags=re.DOTALL | re.IGNORECASE
+    )
+    
+    # Strip Superpowers bootstrap: from "#+ using-superpowers" or "IMPORTANT: The using-superpowers"
+    # until next "# " or end of string
+    text = re.sub(
+        r"(?:#+ using-superpowers|IMPORTANT: The using-superpowers skill content).*?(?=\n#+ |\Z)",
+        "",
+        text,
+        flags=re.DOTALL | re.IGNORECASE
+    )
+    
+    # Clean up double newlines
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _minify_system_prompt(system):
+    if isinstance(system, str):
+        return _minify_system_text(system)
+    elif isinstance(system, list):
+        new_system = []
+        for block in system:
+            if isinstance(block, dict) and block.get("type") == "text":
+                nb = dict(block)
+                nb["text"] = _minify_system_text(block["text"])
+                new_system.append(nb)
+            else:
+                new_system.append(block)
+        return new_system
+    return system
+
+
 def _trim_inner(body: dict) -> dict:
     messages = body.get("messages")
     if not isinstance(messages, list) or not messages:
         return body
 
-    breakpoint_idx = _last_cache_breakpoint_index(messages)
-    frozen = messages[: breakpoint_idx + 1]
-    scorable = messages[breakpoint_idx + 1:]
-    if not scorable:
-        return body  # the cache breakpoint covers the entire history
-
     keep_n = config.keep_last_turns()
-    tail = scorable[-keep_n:] if keep_n > 0 else []
-    head = scorable[: len(scorable) - len(tail)]
-    if not head:
-        return body  # everything left is within the "keep verbatim" window
+    total_len = len(messages)
 
-    mode = config.mode()
-    threshold = config.relevance_threshold()
+    query = ""
+    mode = "fast"
+    threshold = 0.15
     keep_items = config.json_keep_items()
-    query = _newest_user_text(messages)
-    corpus = _build_prose_corpus(head)
+    corpus = []
+    
+    if config.trim_prose():
+        query = _newest_user_text(messages)
+        mode = config.mode()
+        threshold = config.relevance_threshold()
+        head_messages = messages[: max(0, total_len - keep_n)]
+        corpus = _build_prose_corpus(head_messages)
 
-    new_head = []
-    for m in head:
+    any_changed = False
+    new_messages = []
+    for i, m in enumerate(messages):
+        is_old_turn = (i < total_len - keep_n)
+        orig_content = m.get("content")
+        new_content = _process_content(
+            orig_content,
+            is_old_turn=is_old_turn,
+            query=query,
+            mode=mode,
+            threshold=threshold,
+            keep_items=keep_items,
+            corpus=corpus
+        )
+        if new_content is not orig_content:
+            any_changed = True
+        
         nm = dict(m)
-        nm["content"] = _process_content(m.get("content"), query, mode, threshold, keep_items, corpus)
-        new_head.append(nm)
+        nm["content"] = new_content
+        new_messages.append(nm)
 
-    new_body = dict(body)
-    new_body["messages"] = frozen + new_head + tail
-    return new_body
+    if any_changed:
+        new_body = dict(body)
+        new_body["messages"] = new_messages
+        return new_body
+    return body
 
 
-_STUB_PREFIX = "[winnow: older message omitted"
+_STUB_PREFIX = "[winnow:"
 
 
 def diff_stats(original: dict, trimmed: dict) -> dict:
@@ -224,10 +332,14 @@ def trim(body: dict) -> dict:
     payload estimated larger than the input (reqs 1/3/4 all enforced here).
     """
     try:
-        original_size = tokencount.estimate(body)
-        trimmed = _trim_inner(body)
+        new_body = dict(body)
+        if "system" in new_body and config.minify_system():
+            new_body["system"] = _minify_system_prompt(new_body["system"])
+            
+        original_size = tokencount.estimate(new_body)
+        trimmed = _trim_inner(new_body)
         if tokencount.estimate(trimmed) >= original_size:
-            return body
+            return new_body
         return trimmed
     except Exception:
         return body

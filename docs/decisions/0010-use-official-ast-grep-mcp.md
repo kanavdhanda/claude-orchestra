@@ -1,3 +1,9 @@
+---
+tags: [ast-grep, mcp, reuse-existing]
+related: []
+influences: []
+---
+
 # 0010. Use Official ast-grep MCP Instead of Building a Custom One
 
 **Status:** Accepted

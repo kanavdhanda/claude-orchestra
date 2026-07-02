@@ -19,6 +19,7 @@ def test_adversarial_bloat_falls_back_to_original(monkeypatch):
     # Pathologically inflate what truncate_json returns, simulating a bug in
     # the trimming path. The guard in trimmer.trim must catch the resulting
     # size increase and hand back the untouched original instead.
+    monkeypatch.setenv("WINNOW_STUB_OLD_TOOL_RESULTS", "false")
     def bloat(value, keep_items=20):
         return ["x" * 10_000] * 500
 

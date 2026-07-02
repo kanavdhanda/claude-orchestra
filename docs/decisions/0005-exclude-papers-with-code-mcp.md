@@ -1,3 +1,9 @@
+---
+tags: [research-tools, exclusion, dead-service]
+related: []
+influences: []
+---
+
 # 0005. Exclude Papers with Code MCP
 
 **Status:** Accepted
