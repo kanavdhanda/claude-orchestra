@@ -3,6 +3,8 @@ import sys
 import subprocess
 import json
 import urllib.request
+import threading
+import time
 
 def install_and_import(package):
     import importlib
@@ -50,93 +52,110 @@ class WinnowMenuBarApp(rumps.App):
             rumps.MenuItem("Restart Winnow Proxy", callback=self.restart_proxy),
         ]
         
-        self.timer = rumps.Timer(self.update_menu_state, 5)
-        self.timer.start()
-        self.update_menu_state(None)
-
-    def update_menu_state(self, sender):
-        # 1. Update Winnow Proxy enabled/disabled state
-        disabled_file = os.path.expanduser("~/.winnow/disabled")
-        is_enabled = not os.path.exists(disabled_file)
+        self.cached_models_list = []
+        self.is_updating = False
         
-        if is_enabled:
-            self.status_item.title = "🟢 Winnow: Active"
-            self.toggle_item.title = "Disable Winnow (⌥⌘W)"
-        else:
-            self.status_item.title = "🔴 Winnow: Disabled"
-            self.toggle_item.title = "Enable Winnow (⌥⌘W)"
-            
-        # 2. Fetch stats from local Winnow proxy
+        self.timer = rumps.Timer(self.trigger_background_update, 5)
+        self.timer.start()
+        self.trigger_background_update(None)
+
+    def trigger_background_update(self, sender):
+        if not self.is_updating:
+            threading.Thread(target=self.update_menu_state_async, daemon=True).start()
+
+    def update_menu_state_async(self):
+        self.is_updating = True
         try:
-            req = urllib.request.Request("http://localhost:8787/winnow/stats", method="GET")
-            with urllib.request.urlopen(req, timeout=1.0) as response:
-                data = json.loads(response.read().decode("utf-8"))
-                saved = data.get("tokens_saved_total", 0)
-                cost_saved = (saved * 3.00) / 1000000.0
-                self.stats_item.title = f"Saved: {saved:,} tokens (${cost_saved:.2f})"
-        except Exception:
-            self.stats_item.title = "Saved: Proxy Offline"
+            # 1. Update Winnow Proxy enabled/disabled state
+            disabled_file = os.path.expanduser("~/.winnow/disabled")
+            is_enabled = not os.path.exists(disabled_file)
             
-        # 3. Check oMLX server status & active model liveness
-        active_model = get_active_model()
-        try:
-            # First, fetch available models
-            req = urllib.request.Request("http://localhost:8081/v1/models", method="GET")
-            with urllib.request.urlopen(req, timeout=1.0) as response:
-                data = json.loads(response.read().decode("utf-8"))
-                models = [m["id"] for m in data.get("data", []) if "gemma" not in m["id"].lower()]
+            if is_enabled:
+                self.status_item.title = "🟢 Winnow: Active"
+                self.toggle_item.title = "Disable Winnow (⌥⌘W)"
+            else:
+                self.status_item.title = "🔴 Winnow: Disabled"
+                self.toggle_item.title = "Enable Winnow (⌥⌘W)"
                 
-                self.model_menu.clear()
-                all_options = models if active_model in models else [active_model] + models
-                for model in all_options:
-                    item = rumps.MenuItem(model, callback=self.select_model)
-                    if model == active_model:
-                        item.state = True
-                    self.model_menu.add(item)
-            
-            # Second, perform a true query liveness check on the active model
-            test_payload = {
-                "model": active_model,
-                "messages": [
-                    {"role": "user", "content": "say true"}
-                ],
-                "max_tokens": 5
-            }
-            req_liveness = urllib.request.Request(
-                "http://localhost:8081/v1/chat/completions",
-                data=json.dumps(test_payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST"
-            )
-            with urllib.request.urlopen(req_liveness, timeout=2.5) as response:
-                res_data = json.loads(response.read().decode("utf-8"))
-                reply = res_data["choices"][0]["message"]["content"].strip().lower()
-                if len(reply) > 0:
-                    display_name = active_model.split("/")[-1]
-                    if len(display_name) > 28:
-                        display_name = display_name[:25] + "..."
-                    self.omlx_status.title = f"🟢 oMLX: {display_name}"
-                else:
-                    self.omlx_status.title = f"🔴 oMLX: Liveness Empty Output"
-        except Exception:
-            display_name = active_model.split("/")[-1]
-            if len(display_name) > 20:
-                display_name = display_name[:17] + "..."
-            self.omlx_status.title = f"🔴 oMLX: Pinned Model Error ({display_name})"
+            # 2. Fetch stats from local Winnow proxy
+            try:
+                req = urllib.request.Request("http://localhost:8787/winnow/stats", method="GET")
+                with urllib.request.urlopen(req, timeout=1.0) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+                    saved = data.get("tokens_saved_total", 0)
+                    cost_saved = (saved * 3.00) / 1000000.0
+                    self.stats_item.title = f"Saved: {saved:,} tokens (${cost_saved:.2f})"
+            except Exception:
+                self.stats_item.title = "Saved: Proxy Offline"
+                
+            # 3. Check oMLX server status, populate models list, & check active model liveness
+            active_model = get_active_model()
+            try:
+                req = urllib.request.Request("http://localhost:8081/v1/models", method="GET")
+                with urllib.request.urlopen(req, timeout=1.5) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+                    models = [m["id"] for m in data.get("data", []) if "gemma" not in m["id"].lower()]
+                    
+                    if models != self.cached_models_list:
+                        self.cached_models_list = models
+                        self.model_menu.clear()
+                        all_options = models if active_model in models else [active_model] + models
+                        for model in all_options:
+                            item = rumps.MenuItem(model, callback=self.select_model)
+                            if model == active_model:
+                                item.state = True
+                            self.model_menu.add(item)
+                
+                # Perform a query check to verify the model is operational
+                test_payload = {
+                    "model": active_model,
+                    "messages": [
+                        {"role": "user", "content": "say true"}
+                    ],
+                    "max_tokens": 5
+                }
+                req_liveness = urllib.request.Request(
+                    "http://localhost:8081/v1/chat/completions",
+                    data=json.dumps(test_payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                
+                with urllib.request.urlopen(req_liveness, timeout=8.0) as response:
+                    res_data = json.loads(response.read().decode("utf-8"))
+                    reply = res_data["choices"][0]["message"]["content"].strip().lower()
+                    if len(reply) > 0:
+                        display_name = active_model.split("/")[-1]
+                        if len(display_name) > 28:
+                            display_name = display_name[:25] + "..."
+                        self.omlx_status.title = f"🟢 oMLX: {display_name}"
+                    else:
+                        self.omlx_status.title = f"🔴 oMLX: Model Empty Response"
+            except Exception:
+                display_name = active_model.split("/")[-1]
+                if len(display_name) > 20:
+                    display_name = display_name[:17] + "..."
+                self.omlx_status.title = f"🔴 oMLX: Model Offline/Error ({display_name})"
+        finally:
+            self.is_updating = False
 
     def select_model(self, sender):
+        if sender.title not in self.cached_models_list:
+            rumps.alert("Model Select Error", f"Model '{sender.title}' is not currently loaded on the oMLX server.")
+            return
+
         model_file = os.path.expanduser("~/.winnow/active_model")
         try:
             os.makedirs(os.path.dirname(model_file), exist_ok=True)
             with open(model_file, "w") as f:
                 f.write(sender.title)
             rumps.notification("oMLX", "Active Model Pinned", f"Selected {sender.title.split('/')[-1]}")
-            # Update checks dynamically
             for name, item in self.model_menu.items():
                 item.state = (name == sender.title)
         except Exception as e:
             rumps.alert(f"Error pinning model: {str(e)}")
-        self.update_menu_state(None)
+        
+        self.trigger_background_update(None)
 
     def toggle_winnow(self, sender):
         disabled_file = os.path.expanduser("~/.winnow/disabled")
@@ -154,24 +173,7 @@ class WinnowMenuBarApp(rumps.App):
                 rumps.notification("Winnow", "Proxy Paused", "Trimming disabled. All requests forwarded untouched.")
             except Exception as e:
                 rumps.alert(f"Error disabling Winnow: {str(e)}")
-        self.update_menu_state(None)
-
-    def restart_omlx(self, sender):
-        try:
-            res = subprocess.run("lsof -t -i :8081", shell=True, capture_output=True, text=True)
-            pids = res.stdout.strip().split()
-            if pids:
-                for pid in pids:
-                    subprocess.run(["kill", "-9", pid])
-        except Exception:
-            pass
-            
-        try:
-            subprocess.run(["open", "-a", "oMLX"])
-            rumps.notification("oMLX", "Restarting...", "Launched local oMLX Dashboard Application.")
-        except Exception as e:
-            rumps.alert(f"Failed to start oMLX: {str(e)}")
-        self.update_menu_state(None)
+        self.trigger_background_update(None)
 
     def restart_proxy(self, sender):
         try:
@@ -185,7 +187,7 @@ class WinnowMenuBarApp(rumps.App):
                 rumps.notification("Winnow", "Offline", "No active Winnow proxy found on port 8787.")
         except Exception as e:
             rumps.alert(f"Error restarting Winnow: {str(e)}")
-        self.update_menu_state(None)
+        self.trigger_background_update(None)
 
 if __name__ == "__main__":
     app = WinnowMenuBarApp()
