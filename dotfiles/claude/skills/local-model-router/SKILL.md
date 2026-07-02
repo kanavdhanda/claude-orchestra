@@ -66,13 +66,13 @@ Discover the model ID dynamically from the oMLX models list (it will automatical
 
 ```bash
 # 1. Discover active model ID dynamically
-MODEL_ID=$(curl -s http://localhost:8081/v1/models | jq -r '.data[0].id // empty')
+MODEL_ID=$(curl -s http://localhost:8000/v1/models | jq -r '.data[0].id // empty')
 if [ -z "$MODEL_ID" ]; then
   MODEL_ID="Qwen3.5-9B-TNG-PKD-Qwopus-Coder-Qwythos-qx86-hi-mlx" # Fallback
 fi
 
 # 2. Call the chat completions endpoint with your custom prompt
-curl -s -m 30 http://localhost:8081/v1/chat/completions \
+curl -s -m 30 http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d "{\"model\": \"$MODEL_ID\", \"messages\": [{\"role\": \"system\", \"content\": \"You are a senior developer. Respond extremely concisely, providing direct answers and code snippets without conversational filler or apologies.\"}, {\"role\": \"user\", \"content\": \"<task-specific prompt>\"}], \"max_tokens\": 2000}"
 ```

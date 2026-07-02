@@ -78,7 +78,7 @@ def max_session_cost() -> float:
 
 
 def omlx_url() -> str:
-    return os.environ.get("WINNOW_OMLX_URL", "http://localhost:8081").rstrip("/")
+    return os.environ.get("WINNOW_OMLX_URL", "http://localhost:8000").rstrip("/")
 
 
 def omlx_enabled() -> bool:

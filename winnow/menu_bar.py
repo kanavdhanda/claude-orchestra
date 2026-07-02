@@ -3,6 +3,7 @@ import sys
 import subprocess
 import json
 import urllib.request
+import urllib.parse
 import threading
 import time
 
@@ -16,6 +17,9 @@ def install_and_import(package):
 
 install_and_import("rumps")
 import rumps
+
+# Import winnow config dynamically
+from winnow import config
 
 def get_active_model() -> str:
     env_model = os.environ.get("WINNOW_LOCAL_MODEL")
@@ -90,8 +94,10 @@ class WinnowMenuBarApp(rumps.App):
                 
             # 3. Check oMLX server status, populate models list, & check active model liveness
             active_model = get_active_model()
+            omlx_base_url = config.omlx_url()
             try:
-                req = urllib.request.Request("http://localhost:8081/v1/models", method="GET")
+                # Fetch available models list from oMLX API dynamically
+                req = urllib.request.Request(f"{omlx_base_url}/v1/models", method="GET")
                 with urllib.request.urlopen(req, timeout=1.5) as response:
                     data = json.loads(response.read().decode("utf-8"))
                     models = [m["id"] for m in data.get("data", []) if "gemma" not in m["id"].lower()]
@@ -106,7 +112,7 @@ class WinnowMenuBarApp(rumps.App):
                                 item.state = True
                             self.model_menu.add(item)
                 
-                # Perform a query check to verify the model is operational
+                # Perform query liveness check on active model
                 test_payload = {
                     "model": active_model,
                     "messages": [
@@ -115,7 +121,7 @@ class WinnowMenuBarApp(rumps.App):
                     "max_tokens": 5
                 }
                 req_liveness = urllib.request.Request(
-                    "http://localhost:8081/v1/chat/completions",
+                    f"{omlx_base_url}/v1/chat/completions",
                     data=json.dumps(test_payload).encode("utf-8"),
                     headers={"Content-Type": "application/json"},
                     method="POST"
