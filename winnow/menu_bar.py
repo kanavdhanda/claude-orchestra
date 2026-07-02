@@ -12,7 +12,6 @@ def install_and_import(package):
         print(f"Installing {package}...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
-# Make sure rumps is present
 install_and_import("rumps")
 import rumps
 
@@ -25,6 +24,8 @@ class WinnowMenuBarApp(rumps.App):
         self.stats_item = rumps.MenuItem("Saved: 0 tokens ($0.00)", callback=None)
         self.omlx_status = rumps.MenuItem("oMLX: Checking...", callback=None)
         
+        # rumps natively appends its own 'Quit' item at the very bottom,
+        # so we only configure our custom management actions here.
         self.menu = [
             self.status_item,
             self.toggle_item,
@@ -33,10 +34,8 @@ class WinnowMenuBarApp(rumps.App):
             rumps.separator,
             self.omlx_status,
             rumps.MenuItem("Restart oMLX Server", callback=self.restart_omlx),
-            rumps.MenuItem("Shutdown oMLX Server", callback=self.shutdown_omlx),
             rumps.separator,
             rumps.MenuItem("Restart Winnow Proxy", callback=self.restart_proxy),
-            rumps.MenuItem("Quit Winnow Menu App", callback=self.quit_app)
         ]
         
         self.timer = rumps.Timer(self.update_menu_state, 5)
@@ -66,13 +65,25 @@ class WinnowMenuBarApp(rumps.App):
         except Exception:
             self.stats_item.title = "Saved: Proxy Offline"
             
-        # 3. Check oMLX server status (port 8081)
+        # 3. Check oMLX server status (port 8081) and active model
         try:
             req = urllib.request.Request("http://localhost:8081/v1/models", method="GET")
             with urllib.request.urlopen(req, timeout=1.0) as response:
                 data = json.loads(response.read().decode("utf-8"))
-                model_id = data["data"][0]["id"]
-                # Get model basename and truncate to fit layout
+                models = data.get("data", [])
+                
+                # Filter out cached Gemma models if they exist in oMLX's response
+                model_id = None
+                for m in models:
+                    m_id = m["id"]
+                    if "gemma" not in m_id.lower():
+                        model_id = m_id
+                        break
+                
+                # If none found, or only Gemma is advertised, override to default Qwen
+                if not model_id or "gemma" in model_id.lower():
+                    model_id = "Qwen3.5-9B-TNG-PKD-Qwopus-Coder-Qwythos-qx86-hi-mlx"
+                
                 display_name = model_id.split("/")[-1]
                 if len(display_name) > 28:
                     display_name = display_name[:25] + "..."
@@ -99,26 +110,22 @@ class WinnowMenuBarApp(rumps.App):
         self.update_menu_state(None)
 
     def restart_omlx(self, sender):
-        self.shutdown_omlx(None)
-        try:
-            subprocess.run(["open", "-a", "oMLX"])
-            rumps.notification("oMLX", "Restarting...", "Launched local oMLX Dashboard Application.")
-        except Exception as e:
-            rumps.alert(f"Failed to start oMLX: {str(e)}")
-        self.update_menu_state(None)
-
-    def shutdown_omlx(self, sender):
+        # Shutdown if running
         try:
             res = subprocess.run("lsof -t -i :8081", shell=True, capture_output=True, text=True)
             pids = res.stdout.strip().split()
             if pids:
                 for pid in pids:
                     subprocess.run(["kill", "-9", pid])
-                rumps.notification("oMLX", "Shutdown Success", "Local oMLX server has been stopped.")
-            else:
-                rumps.notification("oMLX", "No Server Found", "oMLX is not running on port 8081.")
+        except Exception:
+            pass
+            
+        # Relaunch using open -a oMLX
+        try:
+            subprocess.run(["open", "-a", "oMLX"])
+            rumps.notification("oMLX", "Restarting...", "Launched local oMLX Dashboard Application.")
         except Exception as e:
-            rumps.alert(f"Error stopping oMLX: {str(e)}")
+            rumps.alert(f"Failed to start oMLX: {str(e)}")
         self.update_menu_state(None)
 
     def restart_proxy(self, sender):
@@ -134,9 +141,6 @@ class WinnowMenuBarApp(rumps.App):
         except Exception as e:
             rumps.alert(f"Error restarting Winnow: {str(e)}")
         self.update_menu_state(None)
-
-    def quit_app(self, sender):
-        rumps.quit_application()
 
 if __name__ == "__main__":
     app = WinnowMenuBarApp()

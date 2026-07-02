@@ -129,7 +129,15 @@ async def _call_omlx(prompt: str) -> str:
     async with httpx.AsyncClient(timeout=45.0) as client:
         try:
             m_resp = await client.get(f"{config.omlx_url()}/v1/models")
-            model_id = m_resp.json()["data"][0]["id"]
+            data = m_resp.json().get("data", [])
+            model_id = None
+            for m in data:
+                m_id = m["id"]
+                if "gemma" not in m_id.lower():
+                    model_id = m_id
+                    break
+            if not model_id or "gemma" in model_id.lower():
+                model_id = "Qwen3.5-9B-TNG-PKD-Qwopus-Coder-Qwythos-qx86-hi-mlx"
         except Exception:
             model_id = "Qwen3.5-9B-TNG-PKD-Qwopus-Coder-Qwythos-qx86-hi-mlx"
             
