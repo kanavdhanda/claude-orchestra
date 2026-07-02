@@ -131,7 +131,7 @@ async def _call_omlx(prompt: str) -> str:
             m_resp = await client.get(f"{config.omlx_url()}/v1/models")
             model_id = m_resp.json()["data"][0]["id"]
         except Exception:
-            model_id = "mlx-community/gemma-4-12b-coder-fable5-composer2.5-8bit"
+            model_id = "Qwen3.5-9B-TNG-PKD-Qwopus-Coder-Qwythos-qx86-hi-mlx"
             
         payload = {
             "model": model_id,
@@ -157,7 +157,7 @@ async def omlx_response_stream(text: str):
             "type": "message",
             "role": "assistant",
             "content": [],
-            "model": "local-omlx-gemma",
+            "model": "local-omlx-qwen",
             "stop_reason": None,
             "stop_sequence": None,
             "usage": {"input_tokens": 0, "output_tokens": 0}

@@ -68,7 +68,7 @@ Discover the model ID dynamically from the oMLX models list (it will automatical
 # 1. Discover active model ID dynamically
 MODEL_ID=$(curl -s http://localhost:8081/v1/models | jq -r '.data[0].id // empty')
 if [ -z "$MODEL_ID" ]; then
-  MODEL_ID="mlx-community/gemma-4-12b-coder-fable5-composer2.5-8bit" # Fallback
+  MODEL_ID="Qwen3.5-9B-TNG-PKD-Qwopus-Coder-Qwythos-qx86-hi-mlx" # Fallback
 fi
 
 # 2. Call the chat completions endpoint with your custom prompt
