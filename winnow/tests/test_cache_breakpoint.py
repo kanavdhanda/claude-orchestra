@@ -36,7 +36,14 @@ def test_last_cache_breakpoint_index_ignores_plain_string_content():
     (fixtures.cache_late_chat, 5),
     (fixtures.cache_multi_breakpoint_chat, 5),
 ])
-def test_frozen_prefix_is_byte_identical_after_trim(fixture_fn, breakpoint_idx):
+def test_frozen_prefix_is_byte_identical_after_trim(fixture_fn, breakpoint_idx, monkeypatch):
+    # Force every prose block to score below threshold, including the frozen
+    # ones. Under the fix, frozen messages are never scored/stubbed no matter
+    # the threshold. Under the pre-fix bug (scoring ran over all messages),
+    # this would stub the frozen prefix too, failing the assertion below —
+    # unlike the default threshold, which every fixture's content clears
+    # regardless, making the test pass on both correct and buggy code.
+    monkeypatch.setenv("WINNOW_RELEVANCE_THRESHOLD", "2.0")
     body = fixture_fn()
     trimmed = trimmer.trim(fixture_fn())
     assert trimmed["messages"][: breakpoint_idx + 1] == body["messages"][: breakpoint_idx + 1]
@@ -53,12 +60,13 @@ def test_last_n_messages_still_kept_verbatim_with_a_cache_breakpoint(fixture_fn)
 
 
 def test_cache_breakpoint_covering_the_whole_history_returns_body_unchanged():
-    # cache_late_chat's breakpoint is at index 5 of 9 messages; if
-    # WINNOW_KEEP_LAST_TURNS were large enough that scorable ends up empty,
-    # trim() must hand back the original body rather than an empty-messages
-    # rewrite. keep_last_turns() defaults to 2, so scorable = messages[6:9]
-    # (3 messages) is non-empty by default — this asserts the *shape* of that
-    # guard using the real default rather than monkeypatching config.
-    body = fixtures.cache_late_chat()
-    trimmed = trimmer.trim(fixtures.cache_late_chat())
-    assert len(trimmed["messages"]) == len(body["messages"])
+    # cache_covers_whole_history_chat's marker sits on the LAST message, so
+    # breakpoint_idx == len(messages) - 1 and `scorable` is unambiguously
+    # empty — this reaches _trim_inner's `if not scorable: return body`
+    # specifically (as opposed to the separate "everything is within the
+    # keep-tail window" early return a few lines below it). Calling
+    # _trim_inner directly (not trim()) so the guarded wrapper's own
+    # size-comparison fallback can't be confused for this branch.
+    body = fixtures.cache_covers_whole_history_chat()
+    trimmed = trimmer._trim_inner(body)
+    assert trimmed is body
