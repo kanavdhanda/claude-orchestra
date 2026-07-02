@@ -36,9 +36,9 @@ When the user types `/graphify`, invoke the Skill tool with `skill: "graphify"` 
 # <<< active-infrastructure <<<
 # >>> session-continuity >>>
 ## Session Continuity
-- On session start: If starting in a new repository where project memory is missing, automatically initialize it by executing the `/project-memory` skill flow. Otherwise, check `docs/SESSION_LOG.md`, open plans, or git diffs to resume without asking.
-- Task Resumption: Unless the user explicitly asks to start fresh or ignore past sessions, when they say "continue", "resume", or similar, immediately read the top line of `docs/SESSION_LOG.md` and open the referenced `docs/sessions/<date>.md` to discover exactly where the last session left off. Inspect the current `git status`, git diff, and active branch to pick up the implementation immediately from that state without asking the user for background info.
-- On session end/pause: Write handoff details in `docs/sessions/YYYY-MM-DD.md`. Append the new session line to the top of `docs/SESSION_LOG.md` and **strictly keep only the newest 5 sessions** in the list, pruning any lines older than the top 5 to keep the log index compact.
+- On session start: Do NOT automatically load or read any daily session files. Only check `docs/SESSION_LOG.md` (index) or run git status to understand the current workspace.
+- Task Resumption: If the user says "continue" or "resume", read ONLY the 9-line `docs/SESSION_LOG.md` index first. If you need details on past progress, run local `rg` over the `docs/sessions/` directory first. Only read a specific session file (e.g. `docs/sessions/YYYY-MM-DD.md`) using `view_file` if the grep results confirm it contains the required context. Never read multiple session files.
+- On session end/pause: Write handoff details in `docs/sessions/YYYY-MM-DD.md` (keep it under 50 lines). Append the new session line to the top of `docs/SESSION_LOG.md` and strictly keep only the newest 5 sessions in the index list.
 - Session Log Size Limit: Individual daily session logs in `docs/sessions/YYYY-MM-DD.md` must be extremely concise and strictly under 50 lines. Do not dump verbose logs, code diffs, or file lists; record only load-bearing decisions, milestones, and outstanding tasks.
 # <<< session-continuity <<<
 # >>> prefix-cache-protection >>>
