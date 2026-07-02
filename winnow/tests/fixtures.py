@@ -129,5 +129,141 @@ def single_message_chat():
     return copy.deepcopy(_SINGLE_MESSAGE_CHAT)
 
 
+_CACHE_EARLY_CHAT = {
+    "model": "claude-sonnet-4-5",
+    "max_tokens": 1024,
+    "system": "You are a helpful coding assistant.",
+    "messages": [
+        {"role": "user", "content": "Can you explain what a Python decorator is?"},
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "A Python decorator is a function that wraps another function to extend its "
+                        "behavior without modifying its source code, using the @decorator syntax."
+                    ),
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        },
+        {"role": "user", "content": "What's a good recipe for pasta carbonara?"},
+        {"role": "assistant", "content": (
+            "Carbonara is made with eggs, pecorino cheese, guanciale, and black pepper, "
+            "tossed with hot pasta off the heat so the eggs form a creamy sauce instead of scrambling."
+        )},
+        {"role": "user", "content": "What's the weather usually like in Lisbon in October?"},
+        {"role": "assistant", "content": (
+            "Lisbon in October is generally mild, with average highs around 22C and "
+            "occasional rain showers as autumn sets in."
+        )},
+        {"role": "user", "content": "Can you show an example of a decorator that logs function calls?"},
+        {"role": "assistant", "content": (
+            "Sure, here's a logging decorator: it wraps a function, prints the function "
+            "name and arguments before calling it, and returns the wrapped result."
+        )},
+        {"role": "user", "content": "Now, going back to decorators - can they take arguments themselves?"},
+    ],
+}
+
+_CACHE_LATE_CHAT = {
+    "model": "claude-sonnet-4-5",
+    "max_tokens": 1024,
+    "system": "You are a helpful coding assistant.",
+    "messages": [
+        {"role": "user", "content": "Can you explain what a Python decorator is?"},
+        {"role": "assistant", "content": (
+            "A Python decorator is a function that wraps another function to extend its "
+            "behavior without modifying its source code, using the @decorator syntax."
+        )},
+        {"role": "user", "content": "What's a good recipe for pasta carbonara?"},
+        {"role": "assistant", "content": (
+            "Carbonara is made with eggs, pecorino cheese, guanciale, and black pepper, "
+            "tossed with hot pasta off the heat so the eggs form a creamy sauce instead of scrambling."
+        )},
+        {"role": "user", "content": "What's the weather usually like in Lisbon in October?"},
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "Lisbon in October is generally mild, with average highs around 22C and "
+                        "occasional rain showers as autumn sets in."
+                    ),
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        },
+        {"role": "user", "content": "Can you show an example of a decorator that logs function calls?"},
+        {"role": "assistant", "content": (
+            "Sure, here's a logging decorator: it wraps a function, prints the function "
+            "name and arguments before calling it, and returns the wrapped result."
+        )},
+        {"role": "user", "content": "Now, going back to decorators - can they take arguments themselves?"},
+    ],
+}
+
+_CACHE_MULTI_BREAKPOINT_CHAT = {
+    "model": "claude-sonnet-4-5",
+    "max_tokens": 1024,
+    "system": "You are a helpful coding assistant.",
+    "messages": [
+        {"role": "user", "content": "Can you explain what a Python decorator is?"},
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "A Python decorator is a function that wraps another function to extend its "
+                        "behavior without modifying its source code, using the @decorator syntax."
+                    ),
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        },
+        {"role": "user", "content": "What's a good recipe for pasta carbonara?"},
+        {"role": "assistant", "content": (
+            "Carbonara is made with eggs, pecorino cheese, guanciale, and black pepper, "
+            "tossed with hot pasta off the heat so the eggs form a creamy sauce instead of scrambling."
+        )},
+        {"role": "user", "content": "What's the weather usually like in Lisbon in October?"},
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "Lisbon in October is generally mild, with average highs around 22C and "
+                        "occasional rain showers as autumn sets in."
+                    ),
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        },
+        {"role": "user", "content": "Can you show an example of a decorator that logs function calls?"},
+        {"role": "assistant", "content": (
+            "Sure, here's a logging decorator: it wraps a function, prints the function "
+            "name and arguments before calling it, and returns the wrapped result."
+        )},
+        {"role": "user", "content": "Now, going back to decorators - can they take arguments themselves?"},
+    ],
+}
+
+
+def cache_early_chat():
+    return copy.deepcopy(_CACHE_EARLY_CHAT)
+
+
+def cache_late_chat():
+    return copy.deepcopy(_CACHE_LATE_CHAT)
+
+
+def cache_multi_breakpoint_chat():
+    return copy.deepcopy(_CACHE_MULTI_BREAKPOINT_CHAT)
+
+
 def all_fixtures():
     return [short_chat(), long_prose_chat(), json_tool_chat(), code_chat(), single_message_chat()]

@@ -145,6 +145,24 @@ def _build_prose_corpus(head: list) -> list:
     return corpus
 
 
+def _has_cache_control(message: dict) -> bool:
+    content = message.get("content")
+    if not isinstance(content, list):
+        return False
+    return any(isinstance(block, dict) and block.get("cache_control") is not None for block in content)
+
+
+def _last_cache_breakpoint_index(messages: list) -> int:
+    """Highest index of a message carrying a cache_control marker, or -1 if
+    none exists. Anthropic's prompt cache requires a byte-identical prefix up
+    to this point, so everything at or before it must never be rescored."""
+    idx = -1
+    for i, m in enumerate(messages):
+        if isinstance(m, dict) and _has_cache_control(m):
+            idx = i
+    return idx
+
+
 def _trim_inner(body: dict) -> dict:
     messages = body.get("messages")
     if not isinstance(messages, list) or not messages:
