@@ -4,6 +4,9 @@ import os
 
 
 def enabled() -> bool:
+    disabled_file = os.path.expanduser("~/.winnow/disabled")
+    if os.path.exists(disabled_file):
+        return False
     return os.environ.get("WINNOW_ENABLED", "true").strip().lower() not in ("false", "0", "no")
 
 
