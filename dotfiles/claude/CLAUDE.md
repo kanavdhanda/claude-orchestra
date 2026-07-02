@@ -39,6 +39,7 @@ When the user types `/graphify`, invoke the Skill tool with `skill: "graphify"` 
 - On session start: If starting in a new repository where project memory is missing, automatically initialize it by executing the `/project-memory` skill flow. Otherwise, check `docs/SESSION_LOG.md`, open plans, or git diffs to resume without asking.
 - Task Resumption: Unless the user explicitly asks to start fresh or ignore past sessions, when they say "continue", "resume", or similar, immediately read the top line of `docs/SESSION_LOG.md` and open the referenced `docs/sessions/<date>.md` to discover exactly where the last session left off. Inspect the current `git status`, git diff, and active branch to pick up the implementation immediately from that state without asking the user for background info.
 - On session end/pause: Write handoff details in `docs/sessions/YYYY-MM-DD.md`. Append the new session line to the top of `docs/SESSION_LOG.md` and **strictly keep only the newest 5 sessions** in the list, pruning any lines older than the top 5 to keep the log index compact.
+- Session Log Size Limit: Individual daily session logs in `docs/sessions/YYYY-MM-DD.md` must be extremely concise and strictly under 50 lines. Do not dump verbose logs, code diffs, or file lists; record only load-bearing decisions, milestones, and outstanding tasks.
 # <<< session-continuity <<<
 # >>> prefix-cache-protection >>>
 ## Prefix Cache Protection & Efficiency
