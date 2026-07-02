@@ -70,7 +70,13 @@ class WinnowMenuBarApp(rumps.App):
         try:
             req = urllib.request.Request("http://localhost:8081/v1/models", method="GET")
             with urllib.request.urlopen(req, timeout=1.0) as response:
-                self.omlx_status.title = "🟢 oMLX: Online"
+                data = json.loads(response.read().decode("utf-8"))
+                model_id = data["data"][0]["id"]
+                # Get model basename and truncate to fit layout
+                display_name = model_id.split("/")[-1]
+                if len(display_name) > 28:
+                    display_name = display_name[:25] + "..."
+                self.omlx_status.title = f"🟢 oMLX: {display_name}"
         except Exception:
             self.omlx_status.title = "🔴 oMLX: Offline"
 
