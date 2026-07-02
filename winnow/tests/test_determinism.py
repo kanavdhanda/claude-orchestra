@@ -9,6 +9,7 @@ from winnow.tests import fixtures
 @pytest.mark.parametrize("fixture_fn", [
     fixtures.short_chat, fixtures.long_prose_chat, fixtures.json_tool_chat,
     fixtures.code_chat, fixtures.single_message_chat,
+    fixtures.cache_early_chat, fixtures.cache_late_chat, fixtures.cache_multi_breakpoint_chat,
 ])
 def test_trim_is_byte_identical_across_runs(fixture_fn):
     body = fixture_fn()

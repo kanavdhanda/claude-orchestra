@@ -168,11 +168,17 @@ def _trim_inner(body: dict) -> dict:
     if not isinstance(messages, list) or not messages:
         return body
 
+    breakpoint_idx = _last_cache_breakpoint_index(messages)
+    frozen = messages[: breakpoint_idx + 1]
+    scorable = messages[breakpoint_idx + 1:]
+    if not scorable:
+        return body  # the cache breakpoint covers the entire history
+
     keep_n = config.keep_last_turns()
-    tail = messages[-keep_n:] if keep_n > 0 else []
-    head = messages[: len(messages) - len(tail)]
+    tail = scorable[-keep_n:] if keep_n > 0 else []
+    head = scorable[: len(scorable) - len(tail)]
     if not head:
-        return body  # everything is within the "keep verbatim" window
+        return body  # everything left is within the "keep verbatim" window
 
     mode = config.mode()
     threshold = config.relevance_threshold()
@@ -187,7 +193,7 @@ def _trim_inner(body: dict) -> dict:
         new_head.append(nm)
 
     new_body = dict(body)
-    new_body["messages"] = new_head + tail
+    new_body["messages"] = frozen + new_head + tail
     return new_body
 
 
