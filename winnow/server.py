@@ -95,100 +95,6 @@ async def sentinel_warning_stream(tokens: int, cost: float, limit: float, model:
     })
 
 
-def _detect_omlx_prompt(body: dict) -> str | None:
-    if not config.omlx_enabled():
-        return None
-    messages = body.get("messages", [])
-    if not messages:
-        return None
-    latest = messages[-1]
-    if latest.get("role") != "user":
-        return None
-    content = latest.get("content")
-    if not isinstance(content, str):
-        return None
-    
-    # Check prefixes
-    prefixes = [
-        "explain:", "doc:", "test:", "regex:", "commit:",
-        "winnow:explain", "winnow:doc", "winnow:test", "winnow:regex", "winnow:commit"
-    ]
-    for p in prefixes:
-        if content.lower().startswith(p):
-            return content[len(p):].strip()
-            
-    # Also auto-route if it's very clearly a simple question and session is short
-    if len(content.split()) < 15 and any(word in content.lower() for word in ["explain", "how do i", "what is", "write docstring", "generate regex"]):
-        return content
-        
-    return None
-
-
-async def _call_omlx(prompt: str) -> str:
-    url = f"{config.omlx_url()}/v1/chat/completions"
-    async with httpx.AsyncClient(timeout=45.0) as client:
-        model_id = config.active_model()
-            
-        payload = {
-            "model": model_id,
-            "messages": [
-                {"role": "system", "content": "You are a senior developer. Respond extremely concisely, providing direct answers and code snippets without conversational filler or apologies."},
-                {"role": "user", "content": prompt}
-            ],
-            "max_tokens": 2000
-        }
-        try:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
-        except Exception as e:
-            return f"Error contacting local oMLX server: {str(e)}"
-
-
-async def omlx_response_stream(text: str):
-    yield _make_sse_chunk("message_start", {
-        "type": "message_start",
-        "message": {
-            "id": "msg_omlx",
-            "type": "message",
-            "role": "assistant",
-            "content": [],
-            "model": "local-omlx-qwen",
-            "stop_reason": None,
-            "stop_sequence": None,
-            "usage": {"input_tokens": 0, "output_tokens": 0}
-        }
-    })
-    yield _make_sse_chunk("content_block_start", {
-        "type": "content_block_start",
-        "index": 0,
-        "content_block": {"type": "text", "text": ""}
-    })
-    
-    # Yield in chunks to simulate active streaming
-    chunk_size = 30
-    for i in range(0, len(text), chunk_size):
-        chunk = text[i:i+chunk_size]
-        yield _make_sse_chunk("content_block_delta", {
-            "type": "content_block_delta",
-            "index": 0,
-            "delta": {"type": "text_delta", "text": chunk}
-        })
-        
-    yield _make_sse_chunk("content_block_stop", {
-        "type": "content_block_stop",
-        "index": 0
-    })
-    yield _make_sse_chunk("message_delta", {
-        "type": "message_delta",
-        "delta": {"stop_reason": "end_turn", "stop_sequence": None},
-        "usage": {"output_tokens": 0}
-    })
-    yield _make_sse_chunk("message_stop", {
-        "type": "message_stop"
-    })
-
-
 def _compress_git_diffs(body: dict) -> dict:
     messages = body.get("messages", [])
     for msg in messages:
@@ -279,27 +185,16 @@ async def proxy(path: str, request: Request):
             body = _strip_preloaded_file_contents(body)
             body = _compress_git_diffs(body)
             
-            # 1. Check transparent local oMLX routing
-            omlx_prompt = _detect_omlx_prompt(body)
-            if omlx_prompt:
-                result = await _call_omlx(omlx_prompt)
-                store.log_request(
-                    tokens_before=tokencount.estimate(body),
-                    tokens_after=0,
-                    mode="omlx",
-                    detail={"prompt": omlx_prompt}
-                )
-                return StreamingResponse(omlx_response_stream(result), media_type="text/event-stream")
+            # 1. Check Dollar Cost Sentinel Safety Cap (opt-in, off by default)
+            if config.sentinel_enabled():
+                before = tokencount.estimate(body)
+                model_name = body.get("model", "claude-3-5-sonnet")
+                est_cost = _calculate_request_cost(model_name, before)
+                limit = config.max_session_cost()
+                if est_cost > limit:
+                    return StreamingResponse(sentinel_warning_stream(before, est_cost, limit, model_name), media_type="text/event-stream")
             
-            # 2. Check Dollar Cost Sentinel Safety Cap
-            before = tokencount.estimate(body)
-            model_name = body.get("model", "claude-3-5-sonnet")
-            est_cost = _calculate_request_cost(model_name, before)
-            limit = config.max_session_cost()
-            if est_cost > limit:
-                return StreamingResponse(sentinel_warning_stream(before, est_cost, limit, model_name), media_type="text/event-stream")
-            
-            # 3. Regular SMWT Trimming
+            # 2. Regular SMWT Trimming
             trimmed = trimmer.trim(body)
             after = tokencount.estimate(trimmed)
             out_bytes = json.dumps(trimmed).encode("utf-8")

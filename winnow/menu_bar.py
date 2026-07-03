@@ -3,9 +3,7 @@ import sys
 import subprocess
 import json
 import urllib.request
-import urllib.parse
 import threading
-import time
 
 def install_and_import(package):
     import importlib
@@ -21,44 +19,119 @@ import rumps
 # Import winnow config dynamically
 from winnow import config
 
-def get_active_model() -> str:
-    env_model = os.environ.get("WINNOW_LOCAL_MODEL")
-    if env_model:
-        return env_model.strip()
-    model_file = os.path.expanduser("~/.winnow/active_model")
-    if os.path.exists(model_file):
-        try:
-            with open(model_file, "r") as f:
-                return f.read().strip()
-        except Exception:
-            pass
-    return "Qwen3.5-9B-TNG-PKD-Qwopus-Coder-Qwythos-qx86-hi-mlx"
+
+def _ensure_bundle_identifier() -> None:
+    """rumps.notification() goes through NSUserNotificationCenter, which
+    refuses to activate for any process whose Info.plist lacks
+    CFBundleIdentifier. Run via a pyenv-installed python.app (no bundled
+    Info.plist at all, e.g. .../bin/Info.plist), that raises "Failed to
+    setup the notification center" and kills the restart/toggle action
+    that triggered it. Mutating NSBundle's in-memory infoDictionary doesn't
+    work — NSUserNotificationCenter re-reads the plist from disk — so we
+    write the actual Info.plist next to sys.executable, same fix macOS's
+    own error dialog suggests via PlistBuddy."""
+    try:
+        plist_path = os.path.join(os.path.dirname(sys.executable), "Info.plist")
+        if not os.path.exists(plist_path):
+            subprocess.run(
+                [
+                    "/usr/libexec/PlistBuddy",
+                    "-c",
+                    "Add :CFBundleIdentifier string com.winnow.menubar",
+                    plist_path,
+                ],
+                capture_output=True,
+            )
+    except Exception:
+        pass
+
+
+_ensure_bundle_identifier()
+
+_ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "menu_icon.png")
+
+
+def _ensure_menu_icon() -> str | None:
+    """Renders the SF Symbol 'brain.head.profile' to a template PNG (black
+    shape + alpha) so macOS auto-colors it white/black to match every other
+    menu bar icon in light/dark mode. Generated once and cached to disk."""
+    if os.path.exists(_ICON_PATH):
+        return _ICON_PATH
+    try:
+        import AppKit
+
+        symbol = AppKit.NSImage.imageWithSystemSymbolName_accessibilityDescription_("brain.head.profile", None)
+        if symbol is None:
+            return None
+        cfg = AppKit.NSImageSymbolConfiguration.configurationWithPointSize_weight_scale_(18.0, 0.0, 2)
+        scaled = symbol.imageWithSymbolConfiguration_(cfg) or symbol
+
+        w, h = int(scaled.size().width * 2), int(scaled.size().height * 2)
+        rep = AppKit.NSBitmapImageRep.alloc().initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel_(
+            None, w, h, 8, 4, True, False, AppKit.NSDeviceRGBColorSpace, 0, 32
+        )
+        rep.setSize_((w, h))
+
+        AppKit.NSGraphicsContext.saveGraphicsState()
+        AppKit.NSGraphicsContext.setCurrentContext_(AppKit.NSGraphicsContext.graphicsContextWithBitmapImageRep_(rep))
+        AppKit.NSColor.blackColor().set()
+        scaled.drawInRect_fromRect_operation_fraction_(
+            AppKit.NSMakeRect(0, 0, w, h), AppKit.NSZeroRect, AppKit.NSCompositingOperationSourceOver, 1.0
+        )
+        AppKit.NSGraphicsContext.restoreGraphicsState()
+
+        os.makedirs(os.path.dirname(_ICON_PATH), exist_ok=True)
+        rep.representationUsingType_properties_(AppKit.NSBitmapImageFileTypePNG, None).writeToFile_atomically_(_ICON_PATH, True)
+        return _ICON_PATH
+    except Exception:
+        return None
+
+
+def _power_status() -> str:
+    try:
+        out = subprocess.run(["pmset", "-g", "batt"], capture_output=True, text=True, timeout=2.0).stdout
+        first_line = out.splitlines()[0] if out else ""
+        on_ac = "AC Power" in first_line
+        low_power = "lowpowermode" in out.lower() and "1" in out.lower().split("lowpowermode")[-1][:5]
+        pct = ""
+        for line in out.splitlines():
+            if "%" in line:
+                pct = line.strip().split(";")[0].split("\t")[-1].strip()
+                break
+        label = f"🔌 AC Power" if on_ac else f"🔋 Battery {pct}".strip()
+        if low_power:
+            label += " (Low Power Mode)"
+        return label
+    except Exception:
+        return "Power: Unknown"
+
 
 class WinnowMenuBarApp(rumps.App):
     def __init__(self):
-        super(WinnowMenuBarApp, self).__init__("Winnow", title="💸")
-        
+        icon_path = _ensure_menu_icon()
+        if icon_path:
+            super(WinnowMenuBarApp, self).__init__("Winnow", title="", icon=icon_path, template=True)
+        else:
+            super(WinnowMenuBarApp, self).__init__("Winnow", title="🧠")
+
         self.status_item = rumps.MenuItem("Winnow: Unknown", callback=None)
         self.toggle_item = rumps.MenuItem("Toggle Winnow (⌥⌘W)", callback=self.toggle_winnow, key="w")
         self.stats_item = rumps.MenuItem("Saved: 0 tokens ($0.00)", callback=None)
-        self.omlx_status = rumps.MenuItem("oMLX: Checking...", callback=None)
-        self.model_menu = rumps.MenuItem("Select Active Model")
-        
+        self.power_item = rumps.MenuItem("Power: Checking...", callback=None)
+
         self.menu = [
             self.status_item,
             self.toggle_item,
             rumps.separator,
             self.stats_item,
             rumps.separator,
-            self.omlx_status,
-            self.model_menu,
+            self.power_item,
             rumps.separator,
             rumps.MenuItem("Restart Winnow Proxy", callback=self.restart_proxy),
         ]
-        
-        self.cached_models_list = []
+
         self.is_updating = False
-        
+
         self.timer = rumps.Timer(self.trigger_background_update, 5)
         self.timer.start()
         self.trigger_background_update(None)
@@ -92,76 +165,10 @@ class WinnowMenuBarApp(rumps.App):
             except Exception:
                 self.stats_item.title = "Saved: Proxy Offline"
                 
-            # 3. Check oMLX server status, populate models list, & check active model liveness
-            active_model = get_active_model()
-            omlx_base_url = config.omlx_url()
-            try:
-                # Fetch available models list from oMLX API dynamically
-                req = urllib.request.Request(f"{omlx_base_url}/v1/models", method="GET")
-                with urllib.request.urlopen(req, timeout=1.5) as response:
-                    data = json.loads(response.read().decode("utf-8"))
-                    models = [m["id"] for m in data.get("data", []) if "gemma" not in m["id"].lower()]
-                    
-                    if models != self.cached_models_list:
-                        self.cached_models_list = models
-                        self.model_menu.clear()
-                        all_options = models if active_model in models else [active_model] + models
-                        for model in all_options:
-                            item = rumps.MenuItem(model, callback=self.select_model)
-                            if model == active_model:
-                                item.state = True
-                            self.model_menu.add(item)
-                
-                # Perform query liveness check on active model
-                test_payload = {
-                    "model": active_model,
-                    "messages": [
-                        {"role": "user", "content": "say true"}
-                    ],
-                    "max_tokens": 5
-                }
-                req_liveness = urllib.request.Request(
-                    f"{omlx_base_url}/v1/chat/completions",
-                    data=json.dumps(test_payload).encode("utf-8"),
-                    headers={"Content-Type": "application/json"},
-                    method="POST"
-                )
-                
-                with urllib.request.urlopen(req_liveness, timeout=8.0) as response:
-                    res_data = json.loads(response.read().decode("utf-8"))
-                    reply = res_data["choices"][0]["message"]["content"].strip().lower()
-                    if len(reply) > 0:
-                        display_name = active_model.split("/")[-1]
-                        if len(display_name) > 28:
-                            display_name = display_name[:25] + "..."
-                        self.omlx_status.title = f"🟢 oMLX: {display_name}"
-                    else:
-                        self.omlx_status.title = f"🔴 oMLX: Model Empty Response"
-            except Exception:
-                display_name = active_model.split("/")[-1]
-                if len(display_name) > 20:
-                    display_name = display_name[:17] + "..."
-                self.omlx_status.title = f"🔴 oMLX: Model Offline/Error ({display_name})"
+            # 3. Update power-state
+            self.power_item.title = _power_status()
         finally:
             self.is_updating = False
-
-    def select_model(self, sender):
-        if sender.title not in self.cached_models_list:
-            rumps.alert("Model Select Error", f"Model '{sender.title}' is not currently loaded on the oMLX server.")
-            return
-
-        model_file = os.path.expanduser("~/.winnow/active_model")
-        try:
-            os.makedirs(os.path.dirname(model_file), exist_ok=True)
-            with open(model_file, "w") as f:
-                f.write(sender.title)
-            rumps.notification("oMLX", "Active Model Pinned", f"Selected {sender.title.split('/')[-1]}")
-            for name, item in self.model_menu.items():
-                item.state = (name == sender.title)
-        except Exception as e:
-            rumps.alert(f"Error pinning model: {str(e)}")
-        
-        self.trigger_background_update(None)
 
     def toggle_winnow(self, sender):
         disabled_file = os.path.expanduser("~/.winnow/disabled")

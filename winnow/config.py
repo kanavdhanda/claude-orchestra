@@ -10,20 +10,6 @@ def enabled() -> bool:
     return os.environ.get("WINNOW_ENABLED", "true").strip().lower() not in ("false", "0", "no")
 
 
-def active_model() -> str:
-    env_model = os.environ.get("WINNOW_LOCAL_MODEL")
-    if env_model:
-        return env_model.strip()
-    model_file = os.path.expanduser("~/.winnow/active_model")
-    if os.path.exists(model_file):
-        try:
-            with open(model_file, "r") as f:
-                return f.read().strip()
-        except Exception:
-            pass
-    return "Qwen3.5-9B-TNG-PKD-Qwopus-Coder-Qwythos-qx86-hi-mlx"
-
-
 def mode() -> str:
     return os.environ.get("WINNOW_MODE", "thorough").strip().lower()
 
@@ -72,17 +58,12 @@ def minify_system() -> bool:
     return os.environ.get("WINNOW_MINIFY_SYSTEM", "false").strip().lower() not in ("false", "0", "no")
 
 
+def sentinel_enabled() -> bool:
+    return os.environ.get("WINNOW_SENTINEL_ENABLED", "false").strip().lower() not in ("false", "0", "no")
+
+
 def max_session_cost() -> float:
     return float(os.environ.get("WINNOW_MAX_SESSION_COST", "0.30"))
-
-
-
-def omlx_url() -> str:
-    return os.environ.get("WINNOW_OMLX_URL", "http://localhost:8000").rstrip("/")
-
-
-def omlx_enabled() -> bool:
-    return os.environ.get("WINNOW_OMLX_ENABLED", "true").strip().lower() not in ("false", "0", "no")
 
 
 
