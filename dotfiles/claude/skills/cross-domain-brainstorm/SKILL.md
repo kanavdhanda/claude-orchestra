@@ -26,14 +26,26 @@ Only when explicitly invoked (`/cross-domain-brainstorm`) or explicitly requeste
 2. **Extract the assumptions.** List the implicit constraints the problem statement takes for granted (e.g. "must be synchronous", "one writer at a time", "state lives in one place").
 3. **Challenge each assumption.** For each one, ask: what if it's false, or inverted?
 4. **Pick 3-5 relevant adjacent disciplines** for *this* problem specifically — don't run the full list mechanically. Candidates: information theory, biology/evolution, control systems, game theory, cryptography, thermodynamics, economics/market design, distributed systems, signal processing, compiler design, robotics, networking, optimization.
-5. **Pull one or two transferable concepts per chosen discipline** and translate each into a candidate idea for the actual problem.
+5. **Pull one or two transferable concepts per chosen discipline** and translate each into a candidate idea for the actual problem. When a concept traces back to a specific paper or named result (not just folk knowledge of the field), identify that paper — a quick search (arxiv/scholar) is worth it here, since step 9 needs the citation, not just the discipline label.
 6. **Reject implausible ideas immediately**, with a one-line reason each. Be honest, not exhaustive — most cross-domain analogies don't survive contact with the real constraints.
 7. **Rank the survivors** on four axes: novelty, impact, feasibility, evidence (existing precedent). A quick per-idea call, not a formal scoring rubric.
-8. **Present the ranked list** back to the user: idea, source analogy, why it might work, why it's ranked where it is.
+8. **Present the ranked list** back to the user: idea, source analogy, why it might work, why it's ranked where it is. Cite the paper (title + link) for any idea that traces to one.
 
 ## Output shape
 
-A short ranked list (rarely more than 5-8 surviving ideas), each with: one-line idea, source discipline/analogy, one-line rationale, rough novelty/impact/feasibility/evidence read. Skip ideas that didn't survive step 6 — don't pad the list with rejects, just note how many were considered and cut.
+A short ranked list (rarely more than 5-8 surviving ideas), each with: one-line idea, source discipline/analogy (paper citation if there is one), one-line rationale, rough novelty/impact/feasibility/evidence read. Skip ideas that didn't survive step 6 — don't pad the list with rejects, just note how many were considered and cut.
+
+## Recording paper-sourced ideas
+
+9. If any surviving idea (step 6+) traces to a specific paper, and the project has a `docs/research.md` log with an entry template (as this repo's does — see its "How to add an entry" section), record it there **only if the user picks that idea to move forward with**, not for every idea merely presented:
+   - Create `docs/research/<slug>.md` from that template, filling in:
+     - **Link**: the paper's URL.
+     - **Key Points**: the crux of the paper in 2-4 bullets — the actual mechanism/result being borrowed, not a general summary.
+     - **How It's Influencing Our Approach**: the concrete translation from step 5 — what in *this* problem the concept maps to and why it transfers.
+     - **What It's Influencing**: `influences:` frontmatter + `[[wikilink]]` to the decision/architecture doc the idea feeds into (if one exists yet; add it once `superpowers:writing-plans` produces one).
+   - Add the one-line entry under `docs/research.md`'s `## Entries`.
+   - If the idea changes or supersedes an existing ADR in `docs/decisions/`, update that decision's `related:`/`influences:` frontmatter to link back (`[[<slug>]]`) — don't create a new decision doc from here; that's `writing-plans`'/implementation's job once the design is actually approved.
+   - If the project has no such research/decisions convention, skip this step — don't invent one unprompted.
 
 ## Next step
 
