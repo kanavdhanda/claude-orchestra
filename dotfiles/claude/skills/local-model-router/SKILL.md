@@ -12,7 +12,14 @@ description: >
 
 # Local Model Router
 
-Claude has tool access, file access, and judgment. The local model (served via oMLX at `http://localhost:8081`) or the fallback Haiku model has none of that — they are single text-in/text-out exchanges with no memory, no tools, and no files. They can only answer a prompt you construct and paste back.
+> **DISABLED (temporary).** A marker file at `~/.winnow/omlx_disabled` exists —
+> check for it (`test -f ~/.winnow/omlx_disabled`) before applying this skill.
+> If it's present, do not route anything to the local model or Haiku fallback
+> for local-model reasons; always execute the task directly with the current
+> Claude model. Remove the marker (and this note no longer applies) once the
+> user re-enables local routing.
+
+Claude has tool access, file access, and judgment. The local model (served via oMLX at `http://localhost:8000`) or the fallback Haiku model has none of that — they are single text-in/text-out exchanges with no memory, no tools, and no files. They can only answer a prompt you construct and paste back.
 
 Routing to them trades latency for massive token savings. The user has explicitly accepted that tradeoff.
 
@@ -53,7 +60,7 @@ if [ "$OMLX_FORCE" != "true" ] && pmset -g batt | grep -q "Battery Power"; then
 fi
 
 # Verify oMLX is listening
-curl -s -m 2 http://localhost:8081/v1/models > /dev/null || exit 1
+curl -s -m 2 http://localhost:8000/v1/models > /dev/null || exit 1
 ```
 
 If the check returns a non-zero exit code:
@@ -86,5 +93,5 @@ silently fallback and execute the task using a Haiku subagent, or with Sonnet di
 
 ## Monitoring
 
-- Liveness: `curl -s http://localhost:8081/v1/models`
+- Liveness: `curl -s http://localhost:8000/v1/models`
 - Logs: `/Users/kanavdhanda/Library/Application Support/oMLX/logs/server.log`

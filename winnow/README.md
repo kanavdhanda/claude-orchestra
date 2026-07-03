@@ -75,7 +75,6 @@ returns the original request unmodified.
 ## Deferred (explicitly out of scope for v1)
 
 - Adaptive/online learning — scoring is static and deterministic by design.
-- GUI / menu-bar app.
 - Auth/TLS — localhost-only.
 - Multi-user support.
 - MCP-exposed stats (only HTTP + CLI for now).

@@ -34,3 +34,9 @@ Only when explicitly invoked (`/cross-domain-brainstorm`) or explicitly requeste
 ## Output shape
 
 A short ranked list (rarely more than 5-8 surviving ideas), each with: one-line idea, source discipline/analogy, one-line rationale, rough novelty/impact/feasibility/evidence read. Skip ideas that didn't survive step 6 — don't pad the list with rejects, just note how many were considered and cut.
+
+## Next step
+
+Once the user picks a direction from the ranked list:
+- **If invoked mid-`superpowers:brainstorming`**: return control to that flow's next step (it owns the design-approval gate and will hand off to `superpowers:writing-plans` itself once a design is approved).
+- **If invoked standalone**: this technique only produces ideas, not an approved design — do not go straight to `superpowers:writing-plans` from here. Route back through `superpowers:brainstorming` first to get the chosen idea properly scoped and approved; that flow is what invokes `superpowers:writing-plans` once approved.
