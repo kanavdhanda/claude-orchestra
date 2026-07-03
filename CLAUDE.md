@@ -21,7 +21,16 @@ load the whole decisions/research tree to answer a lookup.
 1. Create `docs/sessions/YYYY-MM-DD.md` (or append to today's file if one
    already exists) with the full entry, then add one short line to the top
    of `docs/SESSION_LOG.md`'s index. Never write session content directly
-   into the index.
+   into the index. The entry must cover, when applicable:
+   - Any `cross-domain-brainstorm`/research findings from this session —
+     which papers were pulled in, the crux of each, and what they're
+     influencing (link the `docs/research/<slug>.md` file, don't repeat its
+     content).
+   - What `superpowers:writing-plans`/`subagent-driven-development` actually
+     produced and finished — which plan, which tasks landed, which didn't.
+   - A final **Continue from:** line naming the exact next action (file,
+     task, or open question) so a future session can resume without
+     re-deriving where things were left.
 2. If the work changed what a decision/paper relates to or affects, update
    *that file's* `related:`/`influences:` frontmatter only — don't backfill
    the whole graph.
